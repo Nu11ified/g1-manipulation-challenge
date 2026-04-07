@@ -1,0 +1,98 @@
+<mujoco model="g1_table_red_block">
+  <!--
+    G1 Table Red Block scene — converted from LuckyEngine .hscene
+    Contains: G1 robot, ground plane, table, red cylindrical block (freejoint),
+              head camera, wrist camera, overhead camera, tracking camera.
+  -->
+
+  <include file="g1.xml"/>
+
+  <statistic center="0.2 0 0.5" extent="2"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="120" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <!-- Skybox -->
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0"
+             width="512" height="3072"/>
+    <!-- Light grey floor -->
+    <texture type="2d" name="groundplane" builtin="flat"
+             rgb1="0.75 0.75 0.75" rgb2="0.7 0.7 0.7"
+             mark="random" markrgb="0.72 0.72 0.72"
+             width="512" height="512"/>
+    <material name="groundplane" texture="groundplane" texuniform="true"
+              texrepeat="8 8" reflectance="0.1"/>
+    <!-- Table materials -->
+    <material name="table_wood" rgba="0.55 0.35 0.2 1" specular="0.3" shininess="0.5"/>
+    <material name="table_blue" rgba="0.1 0.12 0.3 1" specular="0.3" shininess="0.5"/>
+    <!-- Red block material -->
+    <material name="red_plastic" rgba="0.85 0.1 0.1 1" specular="0.5" shininess="0.8"/>
+  </asset>
+
+  <worldbody>
+    <!-- Ground plane -->
+    <geom name="ground" type="plane" size="10 10 0.01" material="groundplane"
+          contype="1" conaffinity="1"/>
+
+    <!-- Ambient light -->
+    <light pos="0 0 4" dir="0 0 -1" diffuse="0.7 0.7 0.7" specular="0.3 0.3 0.3"
+           castshadow="true"/>
+    <light pos="-2 2 3" dir="0.5 -0.5 -1" diffuse="0.3 0.3 0.3" specular="0.1 0.1 0.1"/>
+
+    <!-- Table (static) -->
+    <!-- Hazel: pos=[0.351, 0.713, 0], scale=[0.8, 0.04, 0.5] -->
+    <!-- MuJoCo Z-up: pos=[0.351, 0, 0.713], half-size=[0.4, 0.25, 0.02] -->
+    <body name="table" pos="0.351 0 0.713">
+      <geom name="table_top" type="box" size="0.4 0.25 0.02" material="table_wood"
+            contype="1" conaffinity="1" friction="1 0.1 0.01" mass="10"/>
+      <!-- Table legs -->
+      <geom name="table_leg_1" type="cylinder" size="0.025 0.345" pos="0.35 0.2 -0.365"
+            rgba="0.4 0.25 0.15 1" contype="1" conaffinity="1" mass="1"/>
+      <geom name="table_leg_2" type="cylinder" size="0.025 0.345" pos="-0.35 0.2 -0.365"
+            rgba="0.4 0.25 0.15 1" contype="1" conaffinity="1" mass="1"/>
+      <geom name="table_leg_3" type="cylinder" size="0.025 0.345" pos="0.35 -0.2 -0.365"
+            rgba="0.4 0.25 0.15 1" contype="1" conaffinity="1" mass="1"/>
+      <geom name="table_leg_4" type="cylinder" size="0.025 0.345" pos="-0.35 -0.2 -0.365"
+            rgba="0.4 0.25 0.15 1" contype="1" conaffinity="1" mass="1"/>
+    </body>
+
+    <!-- White table (target / drop-off) — to the right of the robot -->
+    <body name="table_white" pos="-0.3 -0.8 0.613">
+      <geom name="table_white_top" type="box" size="0.35 0.25 0.02" material="table_blue"
+            contype="1" conaffinity="1" friction="1 0.1 0.01" mass="10"/>
+      <geom name="table_white_leg_1" type="cylinder" size="0.025 0.295" pos="0.3 0.2 -0.315"
+            rgba="0.08 0.09 0.22 1" contype="1" conaffinity="1" mass="1"/>
+      <geom name="table_white_leg_2" type="cylinder" size="0.025 0.295" pos="-0.3 0.2 -0.315"
+            rgba="0.08 0.09 0.22 1" contype="1" conaffinity="1" mass="1"/>
+      <geom name="table_white_leg_3" type="cylinder" size="0.025 0.295" pos="0.3 -0.2 -0.315"
+            rgba="0.08 0.09 0.22 1" contype="1" conaffinity="1" mass="1"/>
+      <geom name="table_white_leg_4" type="cylinder" size="0.025 0.295" pos="-0.3 -0.2 -0.315"
+            rgba="0.08 0.09 0.22 1" contype="1" conaffinity="1" mass="1"/>
+    </body>
+
+    <!-- Red block / cylinder (dynamic, with freejoint) -->
+    <!-- Hazel: pos=[0.235, 0.85, -0.026], scale=[0.03, 0.07, 0.03] -->
+    <!-- MuJoCo Z-up: pos=[0.235, 0.026, 0.85] -->
+    <body name="red_block" pos="0.0 0.026 0.85">
+      <freejoint name="red_block_joint"/>
+      <geom name="red_cylinder" type="cylinder" size="0.02 0.035"
+            material="red_plastic" density="100"
+            contype="1" conaffinity="1" friction="3 0.1 0.01"/>
+      <!-- Thin box caps to reinforce top/bottom collision without tipping -->
+      <geom name="red_cap_top" type="box" size="0.018 0.018 0.002" pos="0 0 0.035"
+            rgba="0.85 0.1 0.1 1" density="10"
+            contype="1" conaffinity="1" friction="3 0.1 0.01"/>
+      <geom name="red_cap_bot" type="box" size="0.018 0.018 0.002" pos="0 0 -0.035"
+            rgba="0.85 0.1 0.1 1" density="10"
+            contype="1" conaffinity="1" friction="3 0.1 0.01"/>
+    </body>
+
+    <!-- Fixed cameras -->
+    <camera name="overhead" pos="0.3 0 2.5" xyaxes="1 0 0 0 1 0" fovy="60"/>
+    <camera name="side_view" pos="1.5 -1.5 1.2" xyaxes="0.707 0.707 0 -0.2 0.2 0.96" fovy="50"/>
+  </worldbody>
+</mujoco>
