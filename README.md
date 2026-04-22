@@ -1,5 +1,54 @@
 # Lucky Robots Pick & Place Challenge
 
+## My Submission
+
+On top of the starter files, this submission adds:
+
+- **`sim.py`** — MuJoCo pick-and-place environment (reset/step/reward wiring) and the ONNX routine runner used for evaluation.
+- **`train.py`** — A task-agnostic PPO training framework with optional behavior-cloning warm-start from a teacher policy.
+- **`demo.py`** — The pick-and-place task definition: reward shaping, curriculum stages, and a scripted teacher that drives behavior cloning.
+- **`artifacts/trained/routine.onnx`** — A pretrained routine policy (produced by `make train`).
+
+### Install
+
+```bash
+make install
+```
+
+Creates a `.venv` and installs everything in `requirements.txt`.
+
+### Train
+
+```bash
+# (A) Heavy teacher BC on the narrow spawn band — ~5 min CPU, reproduces the committed routine.onnx
+make train-teacher-high
+
+# (B) BC warm-start + PPO fine-tune over the full spawn range
+make train-teacher-medium
+
+# (C) Pure PPO from reward only, no teacher, full spawn range (long-running)
+make train
+```
+
+Trained policies are written to `artifacts/trained/routine.onnx`.
+
+### Run the pretrained routine
+
+```bash
+# Headless evaluation: 5 rollouts by default, prints success counts
+make run-headless
+
+# Same thing but opens the MuJoCo viewer so you can watch
+make run-headful
+
+# Evaluate more rollouts
+make run-headless RUNS=100
+```
+
+Run `make help` for the full list of targets and override flags.
+
+---
+
 ## Overview
 
 We're inviting you to tackle an open-ended robotics manipulation problem. This isn't a test with a correct answer — it's an opportunity for us to understand how you approach novel challenges, decompose complex problems, and iterate toward solutions.
