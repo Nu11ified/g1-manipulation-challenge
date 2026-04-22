@@ -1,0 +1,65 @@
+.venv/bin/pip install -r requirements.txt
+Requirement already satisfied: imageio==2.37.3 in ./.venv/lib/python3.12/site-packages (from imageio[ffmpeg]==2.37.3->-r requirements.txt (line 1)) (2.37.3)
+Requirement already satisfied: mujoco==3.7.0 in ./.venv/lib/python3.12/site-packages (from -r requirements.txt (line 2)) (3.7.0)
+Requirement already satisfied: numpy==2.2.6 in ./.venv/lib/python3.12/site-packages (from -r requirements.txt (line 3)) (2.2.6)
+Requirement already satisfied: onnx==1.19.0 in ./.venv/lib/python3.12/site-packages (from -r requirements.txt (line 4)) (1.19.0)
+Requirement already satisfied: onnxscript==0.5.6 in ./.venv/lib/python3.12/site-packages (from -r requirements.txt (line 5)) (0.5.6)
+Requirement already satisfied: onnxruntime==1.24.4 in ./.venv/lib/python3.12/site-packages (from -r requirements.txt (line 6)) (1.24.4)
+Requirement already satisfied: torch==2.10.0 in ./.venv/lib/python3.12/site-packages (from -r requirements.txt (line 7)) (2.10.0)
+Requirement already satisfied: pillow>=8.3.2 in ./.venv/lib/python3.12/site-packages (from imageio==2.37.3->imageio[ffmpeg]==2.37.3->-r requirements.txt (line 1)) (12.2.0)
+Requirement already satisfied: absl-py in ./.venv/lib/python3.12/site-packages (from mujoco==3.7.0->-r requirements.txt (line 2)) (2.4.0)
+Requirement already satisfied: etils[epath] in ./.venv/lib/python3.12/site-packages (from mujoco==3.7.0->-r requirements.txt (line 2)) (1.14.0)
+Requirement already satisfied: glfw in ./.venv/lib/python3.12/site-packages (from mujoco==3.7.0->-r requirements.txt (line 2)) (2.10.0)
+Requirement already satisfied: pyopengl in ./.venv/lib/python3.12/site-packages (from mujoco==3.7.0->-r requirements.txt (line 2)) (3.1.10)
+Requirement already satisfied: protobuf>=4.25.1 in ./.venv/lib/python3.12/site-packages (from onnx==1.19.0->-r requirements.txt (line 4)) (7.34.1)
+Requirement already satisfied: typing_extensions>=4.7.1 in ./.venv/lib/python3.12/site-packages (from onnx==1.19.0->-r requirements.txt (line 4)) (4.15.0)
+Requirement already satisfied: ml_dtypes in ./.venv/lib/python3.12/site-packages (from onnx==1.19.0->-r requirements.txt (line 4)) (0.5.4)
+Requirement already satisfied: onnx_ir<2,>=0.1.12 in ./.venv/lib/python3.12/site-packages (from onnxscript==0.5.6->-r requirements.txt (line 5)) (0.2.1)
+Requirement already satisfied: packaging in ./.venv/lib/python3.12/site-packages (from onnxscript==0.5.6->-r requirements.txt (line 5)) (26.1)
+Requirement already satisfied: flatbuffers in ./.venv/lib/python3.12/site-packages (from onnxruntime==1.24.4->-r requirements.txt (line 6)) (25.12.19)
+Requirement already satisfied: sympy in ./.venv/lib/python3.12/site-packages (from onnxruntime==1.24.4->-r requirements.txt (line 6)) (1.14.0)
+Requirement already satisfied: filelock in ./.venv/lib/python3.12/site-packages (from torch==2.10.0->-r requirements.txt (line 7)) (3.29.0)
+Requirement already satisfied: setuptools in ./.venv/lib/python3.12/site-packages (from torch==2.10.0->-r requirements.txt (line 7)) (82.0.1)
+Requirement already satisfied: networkx>=2.5.1 in ./.venv/lib/python3.12/site-packages (from torch==2.10.0->-r requirements.txt (line 7)) (3.6.1)
+Requirement already satisfied: jinja2 in ./.venv/lib/python3.12/site-packages (from torch==2.10.0->-r requirements.txt (line 7)) (3.1.6)
+Requirement already satisfied: fsspec>=0.8.5 in ./.venv/lib/python3.12/site-packages (from torch==2.10.0->-r requirements.txt (line 7)) (2026.3.0)
+Requirement already satisfied: imageio-ffmpeg in ./.venv/lib/python3.12/site-packages (from imageio[ffmpeg]==2.37.3->-r requirements.txt (line 1)) (0.6.0)
+Requirement already satisfied: psutil in ./.venv/lib/python3.12/site-packages (from imageio[ffmpeg]==2.37.3->-r requirements.txt (line 1)) (7.2.2)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in ./.venv/lib/python3.12/site-packages (from sympy->onnxruntime==1.24.4->-r requirements.txt (line 6)) (1.3.0)
+Requirement already satisfied: zipp in ./.venv/lib/python3.12/site-packages (from etils[epath]->mujoco==3.7.0->-r requirements.txt (line 2)) (3.23.1)
+Requirement already satisfied: MarkupSafe>=2.0 in ./.venv/lib/python3.12/site-packages (from jinja2->torch==2.10.0->-r requirements.txt (line 7)) (3.0.3)
+rm -rf artifacts/trained
+mkdir -p artifacts/trained
+.venv/bin/python demo.py train \
+		--device cpu \
+		--num-envs 1 \
+		--horizon 1 \
+		--updates 0 \
+		--minibatch-size 256 \
+		--update-epochs 1 \
+		--learning-rate 3e-4 \
+		--image-size 64 \
+		--max-steps 220 \
+		--seed 0 \
+		--save-every 1 \
+		--demo \
+		--demo-updates 0 \
+		--demo-collect-successes 16 \
+		--demo-max-episodes 40 \
+		--demo-bc-epochs 300 \
+		--demo-seeds 0,1,2,3,4,5,6,7 \
+		--demo-repeat-per-seed 2 \
+		--demo-aux-weight 0.0 \
+		--success-window 1 \
+		--stop-success 2.0 \
+		--save-dir artifacts/trained
+demo-pretrain episodes=16 successes=2 success_rate=0.125 reset_states=268 bc=+0.0911 seeds=[0, 1, 2, 3, 4, 5, 6, 7]
+W0421 23:47:15.137000 57818 .venv/lib/python3.12/site-packages/torch/onnx/_internal/exporter/_registration.py:110] torchvision is not installed. Skipping torchvision::nms
+[torch.onnx] Obtain model graph for `ExportActor([...]` with `torch.export.export(..., strict=False)`...
+[torch.onnx] Obtain model graph for `ExportActor([...]` with `torch.export.export(..., strict=False)`... ✅
+[torch.onnx] Run decomposition...
+/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/copyreg.py:99: FutureWarning: `isinstance(treespec, LeafSpec)` is deprecated, use `isinstance(treespec, TreeSpec) and treespec.is_leaf()` instead.
+  return cls.__new__(cls, *args)
+[torch.onnx] Run decomposition... ✅
+[torch.onnx] Translate the graph into ONNX...
+[torch.onnx] Translate the graph into ONNX... ✅
