@@ -24,14 +24,19 @@ import onnxruntime as ort
 
 from run import CameraRenderer, G1Controller, ONNXPolicy, SCRIPT_DIR, set_armature
 
+DEFAULT_POLICY_PATH = SCRIPT_DIR / "artifacts" / "trained" / "routine.onnx"
 
-# Reward signature: (prev_metrics, current_metrics, step_count, max_steps, training) -> (terms, stage)
-# The env sums terms.values() to get the scalar reward. Stage is an arbitrary
+
+# Reward signature: (prev_metrics, current_metrics, step_count, max_steps,
+# training) -> (terms, stage). The env sums terms.values() to get the scalar
+# reward. Stage is an arbitrary label used by callers for logging/curricula.
 RewardFn = Callable[[dict, dict, int, int, bool], tuple[dict[str, float], str]]
 
 
 @dataclass
 class EnvConfig:
+  """Configurable task and control limits for the pick-and-place environment."""
+
   image_size: tuple[int, int] = (64, 64)
   control_decimation: int = 4
   max_steps: int = 600
@@ -68,12 +73,10 @@ class RoutineONNXPolicy:
     self.output_name = self.session.get_outputs()[0].name
 
   def __call__(self, obs: dict[str, np.ndarray]) -> np.ndarray:
+    """Run the exported policy on a single unbatched environment observation."""
     feeds = {}
     for name in self.input_names:
-      value = obs[name]
-      if value.ndim == len(obs[name].shape):
-        value = value[None]
-      feeds[name] = value.astype(np.float32, copy=False)
+      feeds[name] = np.expand_dims(obs[name], axis=0).astype(np.float32, copy=False)
     return self.session.run([self.output_name], feeds)[0][0]
 
 
@@ -240,6 +243,7 @@ class G1PickPlaceEnv:
     self.prev_action[:] = 0.0
 
   def reset(self, seed: int | None = None) -> dict[str, np.ndarray]:
+    """Reset the simulator and return the first observation for a new episode."""
     if seed is not None:
       self.rng = np.random.default_rng(seed)
     self._reset_robot_pose()
@@ -250,7 +254,7 @@ class G1PickPlaceEnv:
     return self._get_obs(self.prev_metrics)
 
   def snapshot(self) -> dict[str, Any]:
-    """Capture a serializable simulator + controller state for later restoration."""
+    """Capture a copyable simulator and controller state for later restoration."""
     return {
       "qpos": self.data.qpos.copy(),
       "qvel": self.data.qvel.copy(),
@@ -278,7 +282,7 @@ class G1PickPlaceEnv:
     }
 
   def restore(self, snapshot: dict[str, Any]) -> dict[str, np.ndarray]:
-    """Restore a previously captured simulator + controller state."""
+    """Restore a previously captured simulator and controller state."""
     mujoco.mj_resetData(self.model, self.data)
     self.data.qpos[:] = np.asarray(snapshot["qpos"], dtype=np.float64)
     self.data.qvel[:] = np.asarray(snapshot["qvel"], dtype=np.float64)
@@ -315,6 +319,7 @@ class G1PickPlaceEnv:
     return self._get_obs(self.prev_metrics)
 
   def _geom_contact_summary(self) -> dict[str, Any]:
+    """Summarize block contacts relevant to grasp, support, and success checks."""
     hand_touch_bodies = set()
     robot_touch = False
     source_support = False
@@ -349,6 +354,7 @@ class G1PickPlaceEnv:
     }
 
   def _measure(self) -> dict[str, Any]:
+    """Measure task metrics from the current simulator state."""
     base_pos, base_quat = self.controller._get_base_pose()
     lin_vel, ang_vel = self.controller._get_base_velocities()
     proj_gravity = self.controller._get_projected_gravity()
@@ -413,6 +419,7 @@ class G1PickPlaceEnv:
     }
 
   def _render_camera(self, name: str) -> np.ndarray:
+    """Render a camera view in CHW float format or zeros when rendering is off."""
     if self.renderer is None:
       width, height = self.cfg.image_size
       return np.zeros((3, height, width), dtype=np.float32)
@@ -420,6 +427,7 @@ class G1PickPlaceEnv:
     return np.transpose(image, (2, 0, 1))
 
   def _get_obs(self, metrics: dict[str, Any]) -> dict[str, np.ndarray]:
+    """Assemble the policy observation dict from simulator state and metrics."""
     joint_pos = self.controller._get_joint_positions()
     joint_vel = self.controller._get_joint_velocities()
     arm_pos = self.controller._get_arm_joint_positions()
@@ -486,6 +494,7 @@ class G1PickPlaceEnv:
     }
 
   def _reward(self, current: dict[str, Any]) -> tuple[float, dict[str, float], bool, str]:
+    """Compute scalar reward, reward terms, terminal flag, and stage label."""
     if self.reward_fn is None:
       terms: dict[str, float] = {}
       stage = "default"
@@ -503,7 +512,19 @@ class G1PickPlaceEnv:
     return total, terms, done, stage
 
   def step(self, action: np.ndarray) -> tuple[dict[str, np.ndarray], float, bool, dict[str, Any]]:
+    """Advance one control step.
+
+    Args:
+      action: Flat normalized action vector with shape `(action_dim,)`.
+
+    Returns:
+      Tuple of `(obs, reward, done, info)`. `done` covers both true terminal
+      conditions and the episode time limit. Callers that care about the
+      distinction can inspect `info["terminated"]` and `info["truncated"]`.
+    """
     action = np.asarray(action, dtype=np.float32).reshape(-1)
+    if action.size != self.action_dim:
+      raise ValueError(f"expected action shape ({self.action_dim},), got ({action.size},)")
     action = np.clip(action, -1.0, 1.0)
     self.prev_action[:] = action
     self.step_count += 1
@@ -545,6 +566,8 @@ class G1PickPlaceEnv:
       "grasp_score": float(current["grasp_score"]),
       "lift_height": float(current["lift_height"]),
       "stage": stage,
+      "terminated": bool(terminal),
+      "truncated": bool(truncated),
     }
     if done:
       info["episode"] = {
@@ -558,6 +581,7 @@ class G1PickPlaceEnv:
 
 
 def _print_status(step_idx: int, reward: float, info: dict[str, Any]) -> None:
+  """Print a compact rollout status line for debugging and evaluation."""
   if step_idx % 25 != 0 and not info.get("placed", False):
     return
   parts = [
@@ -573,6 +597,7 @@ def _print_status(step_idx: int, reward: float, info: dict[str, Any]) -> None:
 
 
 def _configure_wide_camera(cam: Any) -> None:
+  """Apply a wide third-person camera pose to the passive MuJoCo viewer."""
   cam.lookat[:] = np.array([0.0, -0.35, 0.78], dtype=np.float32)
   cam.distance = 2.35
   cam.azimuth = 150.0
@@ -580,6 +605,7 @@ def _configure_wide_camera(cam: Any) -> None:
 
 
 def run_policy(args: argparse.Namespace) -> None:
+  """Run a trained ONNX routine policy in the simulator."""
   env_cfg = EnvConfig(image_size=(args.image_size, args.image_size), max_steps=args.max_steps)
   if args.block_spawn_x_min is not None and args.block_spawn_x_max is not None:
     env_cfg.block_spawn_x = (args.block_spawn_x_min, args.block_spawn_x_max)
@@ -635,8 +661,9 @@ def run_policy(args: argparse.Namespace) -> None:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
+  """Build the CLI parser for routine policy evaluation."""
   parser = argparse.ArgumentParser(description="Run routine.onnx in the G1 pick-place simulator")
-  parser.add_argument("--policy", type=Path, default=SCRIPT_DIR / "routine.onnx")
+  parser.add_argument("--policy", type=Path, default=DEFAULT_POLICY_PATH)
   parser.add_argument("--episodes", type=int, default=3)
   parser.add_argument("--runs", type=int, default=None, help="Alias for headless evaluation episodes")
   parser.add_argument("--image-size", type=int, default=64)
@@ -652,6 +679,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+  """CLI entry point for running the exported routine policy."""
   args = build_arg_parser().parse_args()
   run_policy(args)
 

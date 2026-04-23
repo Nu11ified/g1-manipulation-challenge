@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import argparse
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +37,8 @@ STAGES = ("approach", "grasp", "lift", "transport", "place")
 
 @dataclass
 class RewardConfig:
+  """Task-specific weights for dense reward shaping terms."""
+
   move_speed: float = 0.05
   source_progress: float = 1.25
   cylinder_progress: float = 2.0
@@ -54,6 +56,8 @@ class RewardConfig:
 
 @dataclass
 class CurriculumConfig:
+  """Thresholds used to label task stages and stage-transition bonuses."""
+
   lift_height: float = 0.04
   transport_distance: float = 0.45
   stage_bonus: float = 0.3
@@ -71,6 +75,7 @@ STAGE_WEIGHTS: dict[str, float] = {
 
 
 def current_stage(metrics: dict[str, Any], cfg: CurriculumConfig) -> str:
+  """Return the current curriculum stage from measured simulator metrics."""
   if metrics["placed"]:
     return "place"
   if metrics["lift_height"] > cfg.lift_height:
@@ -91,6 +96,7 @@ def compute_reward_terms(
   max_steps: int,
   training: bool,
 ) -> tuple[dict[str, float], str]:
+  """Compute dense reward terms and the resulting curriculum stage label."""
   terms = {
     "movement": reward_cfg.move_speed * min(1.0, float(current["lin_vel"][:2].dot(current["lin_vel"][:2]) ** 0.5)),
     "brown_table": reward_cfg.source_progress * (prev["base_to_source"] - current["base_to_source"]),
@@ -143,18 +149,10 @@ def reward_fn(
   max_steps: int,
   training: bool,
 ) -> tuple[dict[str, float], str]:
+  """Module-level reward binding used by subprocess-safe env factories."""
   return compute_reward_terms(
     prev, current, _active_reward_cfg, _active_curriculum_cfg, step_count, max_steps, training
   )
-
-
-# --------------------------------------------------------------------------- #
-# Task profile + env factory.
-# --------------------------------------------------------------------------- #
-@dataclass
-class DemoRewardProfile:
-  reward: RewardConfig = field(default_factory=RewardConfig)
-  curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
 
 
 def build_env_config(
@@ -163,6 +161,7 @@ def build_env_config(
   block_spawn_x: tuple[float, float] | None = None,
   block_spawn_y: tuple[float, float] | None = None,
 ) -> EnvConfig:
+  """Build the environment config used by demo and training entry points."""
   cfg = EnvConfig(image_size=(image_size, image_size), max_steps=max_steps)
   if block_spawn_x is not None:
     cfg.block_spawn_x = block_spawn_x
@@ -174,6 +173,7 @@ def build_env_config(
 def _spawn_range_from_args(args: argparse.Namespace) -> tuple[
   tuple[float, float] | None, tuple[float, float] | None
 ]:
+  """Parse optional CLI spawn-range overrides for the block position."""
   x = None
   if args.block_spawn_x_min is not None and args.block_spawn_x_max is not None:
     x = (args.block_spawn_x_min, args.block_spawn_x_max)
@@ -216,7 +216,6 @@ class DemoScriptConfig:
   place_hover_offset: tuple[float, float, float] = (0.02, 0.0, 0.12)
   place_drop_offset: tuple[float, float, float] = (0.0, 0.0, 0.03)
   reach_gain: float = 12.0
-  walk_gain: float = 2.5
   close_grasp_score: float = 0.55
   lift_height: float = 0.08
   target_distance: float = 0.16
@@ -242,21 +241,23 @@ class ScriptedDemoPolicy:
   def __init__(self, env_cfg: EnvConfig, script_cfg: DemoScriptConfig | None = None):
     self.env_cfg = env_cfg
     self.cfg = script_cfg or DemoScriptConfig()
-    self.phase = "approach"
+    self.reset()
 
   def reset(self) -> None:
+    """Reset the teacher state at the start of each episode."""
     self.phase = "approach"
-    self.phase_steps = 0
-    self.prev_phase = "approach"
 
   def _rel(self, base_pos: np.ndarray, base_quat: np.ndarray, point: np.ndarray) -> np.ndarray:
+    """Express a world-space point in the robot base frame."""
     return G1Controller._quat_apply_inverse(base_quat, point - base_pos)
 
   def _reach_cmd(self, current: np.ndarray, desired: np.ndarray) -> np.ndarray:
+    """Convert a reach-target delta into normalized high-level actions."""
     delta = self.cfg.reach_gain * (desired - current) / self.env_cfg.reach_delta
     return np.clip(delta, -1.0, 1.0)
 
   def _detect_red(self, image: np.ndarray) -> dict[str, float] | None:
+    """Estimate the red object centroid and visible area from a CHW image."""
     rgb = np.transpose(image, (1, 2, 0))
     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
     mask = (r > 0.35) & (r > g * 1.4) & (r > b * 1.4)
@@ -313,12 +314,6 @@ class ScriptedDemoPolicy:
       self.phase = "place"
     elif self.phase == "place" and metrics["target_support"]:
       self.phase = "release"
-
-    if self.phase != self.prev_phase:
-      self.phase_steps = 0
-      self.prev_phase = self.phase
-    else:
-      self.phase_steps += 1
 
     action = np.zeros(7, dtype=np.float32)
 
@@ -419,6 +414,7 @@ def make_teacher(env_cfg: EnvConfig) -> ScriptedDemoPolicy:
 # Scripted-rollout CLI (live demo + video capture).
 # --------------------------------------------------------------------------- #
 def _compose_demo_frame(renderer: CameraRenderer) -> np.ndarray:
+  """Render a 2x2 tiled frame for demo recordings."""
   overhead = renderer.render("overhead")
   side = renderer.render("side_view")
   head = renderer.render("head_cam")
@@ -435,6 +431,7 @@ def _capture_frame(
   sim_time: float,
   record_fps: int,
 ) -> float:
+  """Capture one frame once simulated time reaches the next sample boundary."""
   if writer is None or renderer is None or sim_time + 1e-9 < next_capture_time:
     return next_capture_time
   writer.append_data(_compose_demo_frame(renderer))
@@ -442,6 +439,7 @@ def _capture_frame(
 
 
 def run_scripted_demo(args: argparse.Namespace) -> None:
+  """Run the scripted teacher headlessly, in the viewer, or with recording."""
   spawn_x, spawn_y = _spawn_range_from_args(args)
   env = make_env(
     build_env_config(args.image_size, args.max_steps, spawn_x, spawn_y),
@@ -454,7 +452,6 @@ def run_scripted_demo(args: argparse.Namespace) -> None:
   record_path = args.record.resolve() if args.record is not None else None
   writer: imageio.Writer | None = None
   record_renderer: CameraRenderer | None = None
-  next_capture_time = 0.0
 
   if record_path is not None:
     record_path.parent.mkdir(parents=True, exist_ok=True)
@@ -473,6 +470,7 @@ def run_scripted_demo(args: argparse.Namespace) -> None:
           done = False
           last_info: dict[str, Any] = {}
           sim_time = 0.0
+          next_capture_time = 0.0
           next_capture_time = _capture_frame(
             writer, record_renderer, next_capture_time, sim_time, args.record_fps
           )
@@ -498,6 +496,7 @@ def run_scripted_demo(args: argparse.Namespace) -> None:
         done = False
         last_info: dict[str, Any] = {}
         sim_time = 0.0
+        next_capture_time = 0.0
         next_capture_time = _capture_frame(
           writer, record_renderer, next_capture_time, sim_time, args.record_fps
         )
@@ -521,6 +520,7 @@ def run_scripted_demo(args: argparse.Namespace) -> None:
 # Training CLI: thin wrapper over the agnostic `train.py` framework.
 # --------------------------------------------------------------------------- #
 def run_training(args: argparse.Namespace) -> None:
+  """Translate task-specific CLI args into the generic training entry point."""
   # Lazy import so non-training CLIs don't pay the torch import cost.
   from train import TrainingConfig, run as run_trainer
 
@@ -544,6 +544,7 @@ def run_training(args: argparse.Namespace) -> None:
 # Argparse plumbing.
 # --------------------------------------------------------------------------- #
 def _add_run_args(parser: argparse.ArgumentParser) -> None:
+  """Register CLI flags for scripted demo rollouts and recording."""
   parser.add_argument("--episodes", type=int, default=1)
   parser.add_argument("--image-size", type=int, default=64)
   parser.add_argument("--max-steps", type=int, default=700)
@@ -558,6 +559,7 @@ def _add_run_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_train_args(parser: argparse.ArgumentParser) -> None:
+  """Register CLI flags for PPO and optional teacher warm-start training."""
   parser.add_argument("--num-envs", type=int, default=8)
   parser.add_argument("--horizon", type=int, default=256)
   parser.add_argument("--updates", type=int, default=200)
@@ -599,6 +601,7 @@ def _add_train_args(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+  """Build the top-level task CLI with `run` and `train` subcommands."""
   parser = argparse.ArgumentParser(description=__doc__)
   sub = parser.add_subparsers(dest="command", required=True)
 
@@ -614,6 +617,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+  """CLI entry point for the task driver."""
   args = build_parser().parse_args()
   args.func(args)
 

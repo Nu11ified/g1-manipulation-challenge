@@ -65,6 +65,7 @@ def _worker(
   fixed_reset_seed: int | None,
   teacher_factory_spec: str | None,
 ) -> None:
+  """Run one environment process for the spawn-based vectorized collector."""
   parent_remote.close()
   env_factory = _resolve(env_factory_spec)
   env = env_factory(env_cfg, seed=worker_seed, render_images=True, verbose=False, training=True)
@@ -137,6 +138,7 @@ def _worker(
 
 
 def _deep_copy(value: Any) -> Any:
+  """Copy nested arrays/containers so demo reset states can be reused safely."""
   if isinstance(value, np.ndarray):
     return value.copy()
   if isinstance(value, dict):
@@ -149,6 +151,8 @@ def _deep_copy(value: Any) -> Any:
 
 
 class SubprocVecEnv:
+  """Spawn-based vectorized environment wrapper used by PPO collection."""
+
   def __init__(
     self,
     num_envs: int,
@@ -224,10 +228,12 @@ class SubprocVecEnv:
 
 
 def _stack_obs(obs_list: list[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
+  """Stack per-environment observations into a batch-first observation dict."""
   return {key: np.stack([obs[key] for obs in obs_list], axis=0) for key in obs_list[0]}
 
 
 def _obs_to_torch(obs: dict[str, np.ndarray], device: torch.device) -> dict[str, torch.Tensor]:
+  """Move a NumPy observation dict onto the target torch device."""
   return {
     key: torch.as_tensor(value, dtype=torch.float32, device=device)
     for key, value in obs.items()
@@ -235,6 +241,7 @@ def _obs_to_torch(obs: dict[str, np.ndarray], device: torch.device) -> dict[str,
 
 
 def _atanh(x: torch.Tensor) -> torch.Tensor:
+  """Numerically stable inverse tanh used for tanh-squashed action targets."""
   x = x.clamp(-0.98, 0.98)
   return 0.5 * (torch.log1p(x) - torch.log1p(-x))
 
@@ -243,6 +250,8 @@ def _atanh(x: torch.Tensor) -> torch.Tensor:
 # Policy network: proprio MLP + two image CNNs fused into a shared trunk.
 # --------------------------------------------------------------------------- #
 class VisionEncoder(nn.Module):
+  """Small CNN encoder used for both head and wrist camera streams."""
+
   def __init__(self, channels: int, embed_dim: int):
     super().__init__()
     self.net = nn.Sequential(
@@ -264,6 +273,8 @@ class VisionEncoder(nn.Module):
 
 
 class RoutinePolicy(nn.Module):
+  """Actor-critic policy over proprioception and two image observations."""
+
   def __init__(
     self,
     proprio_dim: int,
@@ -330,6 +341,8 @@ class RoutinePolicy(nn.Module):
 
 
 class ExportActor(nn.Module):
+  """Deterministic actor wrapper used when exporting ONNX inference graphs."""
+
   def __init__(self, policy: RoutinePolicy):
     super().__init__()
     self.policy = policy
@@ -343,6 +356,8 @@ class ExportActor(nn.Module):
 # Rollout buffer, demo dataset, GAE.
 # --------------------------------------------------------------------------- #
 class RolloutBuffer:
+  """Fixed-size rollout storage for PPO updates across all environments."""
+
   def __init__(self, horizon: int, num_envs: int, obs_template: dict[str, np.ndarray], action_dim: int):
     self.horizon = horizon
     self.num_envs = num_envs
@@ -376,6 +391,8 @@ class RolloutBuffer:
 
 @dataclass
 class DemoDataset:
+  """Teacher-generated transitions used for behavior-cloning warm-starts."""
+
   obs: dict[str, np.ndarray]
   actions: np.ndarray
   reset_states: list[dict[str, Any]]
@@ -402,6 +419,7 @@ def compute_gae(
   gamma: float,
   gae_lambda: float,
 ) -> tuple[np.ndarray, np.ndarray]:
+  """Compute generalized advantage estimates and bootstrapped returns."""
   horizon = rewards.shape[0]
   advantages = np.zeros_like(rewards)
   last_adv = np.zeros_like(last_values)
@@ -416,6 +434,7 @@ def compute_gae(
 
 
 def parse_seed_list(seed_spec: str) -> list[int]:
+  """Parse a comma-separated list of integer teacher/demo seeds."""
   seeds = [int(part.strip()) for part in seed_spec.split(",") if part.strip()]
   if not seeds:
     raise ValueError("teacher seed list cannot be empty")
@@ -432,6 +451,7 @@ def collect_demo_dataset(
   seeds: list[int],
   repeats_per_seed: int,
 ) -> DemoDataset:
+  """Collect teacher trajectories used for behavior-cloning warm-starts."""
   env_factory = _resolve(env_factory_spec)
   teacher_factory = _resolve(teacher_factory_spec)
   env = env_factory(env_cfg, seed=seeds[0], render_images=True, verbose=False, training=False)
@@ -526,6 +546,7 @@ def collect_demo_dataset(
 
 
 def _stage_rank(stage: str, stage_weights: dict[str, float]) -> int:
+  """Map a stage label to its relative ordering in the stage-weight config."""
   ordered = sorted(stage_weights.items(), key=lambda kv: kv[1])
   for idx, (name, _) in enumerate(ordered):
     if name == stage:
@@ -543,6 +564,7 @@ def pretrain_from_demo_dataset(
   dataset: DemoDataset,
   cfg: "TrainingConfig",
 ) -> tuple[dict[str, float], int]:
+  """Run supervised behavior-cloning updates before PPO fine-tuning."""
   batch_size = len(dataset.actions)
   indices = np.arange(batch_size)
   metrics = defaultdict(list)
@@ -585,6 +607,7 @@ def ppo_update(
   demo_dataset: DemoDataset | None = None,
   demo_aux_weight: float = 0.0,
 ) -> dict[str, float]:
+  """Run one PPO optimization phase over a filled rollout buffer."""
   batch = buffer.flatten()
   advantages = batch["advantages"]
   advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
@@ -666,6 +689,7 @@ def export_onnx(
   obs_shapes: dict[str, tuple[int, ...]],
   device: torch.device,
 ) -> None:
+  """Export the deterministic actor branch to an ONNX file."""
   actor = ExportActor(policy).to(device).eval()
   dummy = (
     torch.zeros((1, *obs_shapes["proprio"]), device=device),
@@ -691,6 +715,7 @@ def save_checkpoint(
   obs_shapes: dict[str, tuple[int, ...]],
   env_cfg: EnvConfig,
 ) -> None:
+  """Persist training state, model weights, and config for later resume."""
   payload = {
     "model": policy.state_dict(),
     "optimizer": optimizer.state_dict(),
@@ -705,6 +730,7 @@ def save_checkpoint(
 def load_checkpoint(
   path: Path, policy: RoutinePolicy, optimizer: torch.optim.Optimizer | None = None
 ) -> int:
+  """Load model state and optionally optimizer state from a checkpoint."""
   payload = torch.load(path, map_location="cpu", weights_only=False)
   policy.load_state_dict(payload["model"])
   if optimizer is not None and "optimizer" in payload:
@@ -717,6 +743,8 @@ def load_checkpoint(
 # --------------------------------------------------------------------------- #
 @dataclass
 class TrainingConfig:
+  """Hyperparameters and I/O settings for PPO training and demo warm-start."""
+
   num_envs: int = 8
   horizon: int = 256
   updates: int = 200
@@ -794,6 +822,7 @@ class TrainingConfig:
 
 
 def _demo_aux_weight(cfg: TrainingConfig, update_idx: int) -> float:
+  """Return the current BC auxiliary-loss weight for this PPO update."""
   if not cfg.demo_enabled:
     return 0.0
   if update_idx < cfg.demo_updates:
@@ -803,6 +832,7 @@ def _demo_aux_weight(cfg: TrainingConfig, update_idx: int) -> float:
 
 
 def _demo_reset_probability(cfg: TrainingConfig, update_idx: int) -> float:
+  """Return the current probability of resetting from a demo state."""
   if not cfg.demo_enabled or cfg.demo_reset_prob <= 0.0:
     return 0.0
   if update_idx < cfg.demo_updates:
@@ -813,6 +843,7 @@ def _demo_reset_probability(cfg: TrainingConfig, update_idx: int) -> float:
 def _should_stop_on_success(
   stats: dict[str, deque], cfg: TrainingConfig, update_idx: int
 ) -> bool:
+  """Check whether rolling success rate has reached the early-stop target."""
   if cfg.demo_enabled and update_idx < cfg.demo_updates:
     return False
   return (
@@ -828,6 +859,7 @@ def _print_update(
   stats: dict[str, deque],
   train_metrics: dict[str, float],
 ) -> None:
+  """Print a compact one-line summary of the latest PPO update."""
   fps = int(total_steps / max(1e-6, time.time() - start_time))
   parts = [f"update={update_idx}", f"steps={total_steps}", f"fps={fps}"]
   for key in ("episode/return", "episode/length", "episode/success"):
